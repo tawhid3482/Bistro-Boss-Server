@@ -3,6 +3,7 @@ const app = express();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const stripe=require('stripe')(process.env.STRIPE_SECRET_KEY)
 const port = process.env.PORT || 5000;
 
 // middleWare
@@ -31,6 +32,8 @@ async function run() {
     const menuCollection = client.db("bistroDb").collection("menu");
     const reviewsCollection = client.db("bistroDb").collection("reviews");
     const cartCollection = client.db("bistroDb").collection("cart");
+
+    const paymentCollection = client.db("bistroDb").collection("payments");
     // jwt
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -125,32 +128,30 @@ async function run() {
       res.send(result);
     });
 
-
-
     app.get("/menu/:id", async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
+      const query = { _id: id };
       const result = await menuCollection.findOne(query);
       res.send(result);
     });
 
-
-    app.patch('/menu/:id',async(req,res)=>{
-      const item = req.body
-      const id = req.params.id
-      const filter = {_id: new ObjectId(id)}
-      const updatedDoc= {
-        $set:{
-          name:item.name,
+    app.patch("/menu/:id", async (req, res) => {
+      const item = req.body;
+      const id = req.params.id;
+      console.log(id)
+      const filter = { _id: id };
+      const updatedDoc = {
+        $set: {
+          name: item.name,
           category: item.category,
-          price:item.price,
+          price: item.price,
           recipe: item.recipe,
-          image:item.image
-        }
-      }
-      const result = await menuCollection.updateOne(filter,updatedDoc)
-      res.send(result)
-    })
+          image: item.image,
+        },
+      };
+      const result = await menuCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
 
     app.post("/menu", verifyToken, verifyAdmin, async (req, res) => {
       const item = req.body;
@@ -159,7 +160,7 @@ async function run() {
     });
     app.delete("/menu/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
+      const query = { _id: id };
       const result = await menuCollection.deleteOne(query);
       res.send(result);
     });
@@ -188,6 +189,32 @@ async function run() {
       const result = await cartCollection.deleteOne(query);
       res.send(result);
     });
+
+    // payment methord
+    app.post("/create-payment-intent", async (req, res) => {
+      const {price}=req.body
+      const amount = parseInt(price * 100)
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types:['card']
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    })
+    app.post('/payments',async(req,res)=>{
+      const payment= req.body
+      const query = {_id : {
+        $in:payment.cartIds.map(id => new ObjectId(id))
+      }}
+      const deleteResult = await cartCollection.deleteMany(query)
+      
+      const paymentResult = await paymentCollection.insertOne(payment)
+      res.send({paymentResult,deleteResult})
+
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
